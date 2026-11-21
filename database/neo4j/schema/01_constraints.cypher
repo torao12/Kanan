@@ -1,0 +1,10 @@
+CREATE CONSTRAINT cst_usuario_id IF NOT EXISTS FOR (u:Usuario) REQUIRE u.usuario_id IS UNIQUE;
+CREATE CONSTRAINT cst_usuario_rfc IF NOT EXISTS FOR (u:Usuario) REQUIRE u.rfc IS UNIQUE;
+CREATE CONSTRAINT cst_cliente_id IF NOT EXISTS FOR (c:Cliente) REQUIRE c.cliente_id IS UNIQUE;
+CREATE CONSTRAINT cst_transaccion_id IF NOT EXISTS FOR (t:Transaccion) REQUIRE t.transaccion_id IS UNIQUE;
+CREATE CONSTRAINT cst_cfdi_id IF NOT EXISTS FOR (f:CFDI) REQUIRE f.cfdi_id IS UNIQUE;
+CREATE CONSTRAINT cst_cfdi_uuid IF NOT EXISTS FOR (f:CFDI) REQUIRE f.uuid_fiscal IS UNIQUE;
+CREATE CONSTRAINT cst_regla_id IF NOT EXISTS FOR (r:ReglaFiscal) REQUIRE r.regla_id IS UNIQUE;
+CREATE CONSTRAINT cst_boveda_id IF NOT EXISTS FOR (b:BovedaFiscal) REQUIRE b.boveda_id IS UNIQUE;
+CREATE CONSTRAINT cst_cuenta_id IF NOT EXISTS FOR (cb:CuentaBancaria) REQUIRE cb.cuenta_id IS UNIQUE;
+CREATE CONSTRAINT cst_gasto_id IF NOT EXISTS FOR (g:Gasto) REQUIRE g.gasto_id IS UNIQUE;
