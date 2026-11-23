@@ -8,6 +8,7 @@ export class KananOrchestratorService {
   private graphRepo = new GraphLineageRepository();
 
   async provisionarIngreso(input: {
+    usuario_id: string;
     cuenta_id: string;
     cliente_id?: string | null;
     monto: number;
@@ -23,6 +24,7 @@ export class KananOrchestratorService {
     let provision;
     try {
       provision = await this.relationalRepo.provisionarIngreso({
+        usuario_id: input.usuario_id,
         cuenta_id: input.cuenta_id,
         cliente_id: input.cliente_id,
         monto: input.monto,

@@ -6,6 +6,7 @@ CREATE TABLE usuario (
     usuario_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nombre VARCHAR(120) NOT NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
     rfc VARCHAR(13) NOT NULL UNIQUE,
     regimen_fiscal tipo_regimen NOT NULL,
     creado_en TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

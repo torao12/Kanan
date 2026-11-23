@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api/v1";
-const USUARIO_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+const TOKEN_STORAGE_KEY = "kanan_jwt_token";
 
 interface CuentaBancaria {
   cuenta_id: string;
@@ -9,6 +9,12 @@ interface CuentaBancaria {
   numero_cuenta: string;
   clabe: string;
   saldo_disponible: string;
+}
+
+interface ClienteItem {
+  cliente_id: string;
+  nombre_razon_social: string;
+  rfc_emisor: string;
 }
 
 interface Transaccion {
@@ -50,6 +56,7 @@ interface DashboardData {
     balance_neto_boveda: string;
   } | null;
   cuentas: CuentaBancaria[];
+  clientes: ClienteItem[];
   transacciones_recientes: Transaccion[];
   huerfanos: Huerfano[];
   trazabilidad: {
@@ -74,27 +81,62 @@ function parseMongoDecimal(val: any): number {
 }
 
 export function App() {
+  const [token, setToken] = useState<string>(() => localStorage.getItem(TOKEN_STORAGE_KEY) || "");
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+
+  const [nombre, setNombre] = useState("");
+  const [email, setEmail] = useState("ian@kanan.dev");
+  const [password, setPassword] = useState("Kanan2026!");
+  const [rfc, setRfc] = useState("");
+  const [regimenFiscal, setRegimenFiscal] = useState("RESICO");
+  const [bancoInicial, setBancoInicial] = useState("BBVA");
+
   const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Formulario OP-01: Provisión Automática
-  const [cuentaId, setCuentaId] = useState("d0eebc99-9c0b-4ef8-bb6d-6bb9bd380a44");
-  const [clienteId, setClienteId] = useState("e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a55");
+  const [cuentaId, setCuentaId] = useState("");
+  const [clienteId, setClienteId] = useState("");
   const [montoIngreso, setMontoIngreso] = useState("5800");
   const [conceptoIngreso, setConceptoIngreso] = useState("Desarrollo módulo web");
 
-  // Formulario OP-02: Ruptura de Cristal
   const [montoRuptura, setMontoRuptura] = useState("500");
   const [justificacionRuptura, setJustificacionRuptura] = useState("Emergencia médica / liquidez inmediata");
 
-  async function cargarDashboard() {
+  const [montoAbono, setMontoAbono] = useState("500");
+  const [cfdiInputs, setCfdiInputs] = useState<Record<string, string>>({});
+
+  function guardarToken(nextToken: string) {
+    setToken(nextToken);
+    if (nextToken) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, nextToken);
+    } else {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      setData(null);
+    }
+  }
+
+  async function cargarDashboard(activeToken = token) {
+    if (!activeToken) return;
+    setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/dashboard/${USUARIO_ID}`);
+      const res = await fetch(`${API_BASE}/dashboard`, {
+        headers: { Authorization: `Bearer ${activeToken}` },
+      });
+      if (res.status === 401) {
+        guardarToken("");
+        throw new Error("Tu sesión expiró o no es válida. Inicia sesión de nuevo.");
+      }
       if (!res.ok) throw new Error("No se pudo obtener el tablero integrado");
       const json: DashboardData = await res.json();
       setData(json);
+      if (json.cuentas?.length && !json.cuentas.some((c) => c.cuenta_id === cuentaId)) {
+        setCuentaId(json.cuentas[0].cuenta_id);
+      }
+      if (json.clientes?.length && !clienteId) {
+        setClienteId(json.clientes[0].cliente_id);
+      }
     } catch (err: any) {
       setFeedback({ type: "error", text: err.message || "Error de red con backend" });
     } finally {
@@ -103,17 +145,63 @@ export function App() {
   }
 
   useEffect(() => {
-    cargarDashboard();
-  }, []);
+    if (token) {
+      cargarDashboard(token);
+    }
+  }, [token]);
+
+  async function handleAuthSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const endpoint = authMode === "login" ? "/auth/login" : "/auth/register";
+      const payload =
+        authMode === "login"
+          ? { email, password }
+          : {
+              nombre,
+              email,
+              password,
+              rfc,
+              regimen_fiscal: regimenFiscal,
+              institucion_financiera: bancoInicial,
+            };
+
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error de autenticación");
+      guardarToken(json.token);
+      setFeedback({
+        type: "success",
+        text: `Sesión iniciada como ${json.usuario.nombre} (${json.usuario.rfc})`,
+      });
+    } catch (err: any) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function handleProvisionar(e: React.FormEvent) {
     e.preventDefault();
+    if (!cuentaId) {
+      setFeedback({ type: "error", text: "Selecciona una cuenta bancaria" });
+      return;
+    }
     setSubmitting(true);
     setFeedback(null);
     try {
       const res = await fetch(`${API_BASE}/provisionar-ingreso`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           cuenta_id: cuentaId,
           cliente_id: clienteId || null,
@@ -144,9 +232,11 @@ export function App() {
     try {
       const res = await fetch(`${API_BASE}/ruptura-cristal`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
-          usuario_id: USUARIO_ID,
           monto: Number(montoRuptura),
           justificacion: justificacionRuptura,
         }),
@@ -167,7 +257,183 @@ export function App() {
     }
   }
 
-  if (loading) {
+  async function handleReabastecer(e: React.FormEvent) {
+    e.preventDefault();
+    if (!cuentaId) return;
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_BASE}/reabastecer-boveda`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          cuenta_id: cuentaId,
+          monto: Number(montoAbono),
+          justificacion: "Abono voluntario a deuda interna de bóveda",
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error al reabastecer bóveda");
+      setFeedback({
+        type: "success",
+        text: `OP-06 Reabastecimiento aplicado: Bóveda ${formatMoney(
+          json.saldo_reservado
+        )} | Deuda restante: ${formatMoney(json.deuda_restante)}`,
+      });
+      await cargarDashboard();
+    } catch (err: any) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleVincularCfdi(transaccionId: string) {
+    const uuidFiscal =
+      cfdiInputs[transaccionId]?.trim() ||
+      crypto.randomUUID().toUpperCase();
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_BASE}/vincular-cfdi`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          transaccion_id: transaccionId,
+          uuid_fiscal: uuidFiscal,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Error al vincular CFDI");
+      setFeedback({
+        type: "success",
+        text: `OP-04 CFDI ${json.uuid_fiscal} vinculado en PostgreSQL, MongoDB y Neo4j`,
+      });
+      await cargarDashboard();
+    } catch (err: any) {
+      setFeedback({ type: "error", text: err.message });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!token) {
+    return (
+      <div className="layout" style={{ maxWidth: "480px", marginTop: "40px" }}>
+        <div className="card">
+          <h1>Kanan — Acceso Multiusuario</h1>
+          <p className="card-desc">
+            {authMode === "login"
+              ? "Inicia sesión para gestionar tu bóveda fiscal, liquidez y trazabilidad CFDI."
+              : "Registra tu perfil fiscal para inicializar tu bóveda, regla RESICO y cuenta."}
+          </p>
+
+          {feedback && (
+            <div className={`alert ${feedback.type === "success" ? "alert-success" : "alert-error"}`}>
+              {feedback.text}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+            <button
+              type="button"
+              className={`btn ${authMode === "login" ? "btn-primary" : ""}`}
+              onClick={() => setAuthMode("login")}
+            >
+              Iniciar sesión
+            </button>
+            <button
+              type="button"
+              className={`btn ${authMode === "register" ? "btn-primary" : ""}`}
+              onClick={() => setAuthMode("register")}
+            >
+              Registrarse
+            </button>
+          </div>
+
+          <form onSubmit={handleAuthSubmit}>
+            {authMode === "register" && (
+              <>
+                <div className="form-group">
+                  <label>Nombre completo</label>
+                  <input
+                    type="text"
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder="Ej. Ana López"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>RFC (12 o 13 caracteres)</label>
+                  <input
+                    type="text"
+                    value={rfc}
+                    onChange={(e) => setRfc(e.target.value.toUpperCase())}
+                    placeholder="Ej. LOPA980101ABC"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Régimen fiscal</label>
+                  <select value={regimenFiscal} onChange={(e) => setRegimenFiscal(e.target.value)}>
+                    <option value="RESICO">RESICO</option>
+                    <option value="ACTIVIDAD_EMPRESARIAL">ACTIVIDAD_EMPRESARIAL</option>
+                    <option value="SERVICIOS_PROFESIONALES">SERVICIOS_PROFESIONALES</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Banco inicial</label>
+                  <input
+                    type="text"
+                    value={bancoInicial}
+                    onChange={(e) => setBancoInicial(e.target.value)}
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="form-group">
+              <label>Correo electrónico</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label>Contraseña</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting
+                ? "Validando..."
+                : authMode === "login"
+                ? "Entrar a Kanan"
+                : "Crear cuenta y bóveda"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading && !data) {
     return <div className="layout">Cargando arquitectura políglota de Kanan...</div>;
   }
 
@@ -190,6 +456,9 @@ export function App() {
           <span className="badge badge-pg">PostgreSQL 16 (ACID)</span>
           <span className="badge badge-mongo">MongoDB 7 (Auditoría)</span>
           <span className="badge badge-neo">Neo4j 5 (Linaje Grafo)</span>
+          <button type="button" className="btn" onClick={() => guardarToken("")}>
+            Cerrar sesión
+          </button>
         </div>
       </header>
 
@@ -251,8 +520,11 @@ export function App() {
             <div className="form-group">
               <label>Cliente Emisor (Opcional)</label>
               <select value={clienteId} onChange={(e) => setClienteId(e.target.value)}>
-                <option value="e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a55">Acme Corp (ACME900101AB1)</option>
-                <option value="e0eebc99-9c0b-4ef8-bb6d-6bb9bd380a56">Global Tech (GLOB800202CD2)</option>
+                {(data?.clientes || []).map((cl) => (
+                  <option key={cl.cliente_id} value={cl.cliente_id}>
+                    {cl.nombre_razon_social} ({cl.rfc_emisor})
+                  </option>
+                ))}
                 <option value="">Sin cliente identificado</option>
               </select>
             </div>
@@ -284,11 +556,11 @@ export function App() {
 
         <div className="card">
           <h2>
-            <span>Protocolo "Ruptura de Cristal" (OP-02)</span>
+            <span>Protocolo "Ruptura de Cristal" (OP-02) y Reabastecimiento (OP-06)</span>
             <span className="badge badge-mongo">PG ACID + Bitácora Mongo</span>
           </h2>
           <p className="card-desc">
-            Retiro extraordinario de emergencia desde la bóveda fiscal con generación de deuda interna.
+            Retiro extraordinario de emergencia desde bóveda fiscal o abono desde liquidez operativa.
           </p>
           <form onSubmit={handleRuptura}>
             <div className="form-group">
@@ -315,6 +587,25 @@ export function App() {
               {submitting ? "Ejecutando..." : "Ejecutar Ruptura de Cristal"}
             </button>
           </form>
+
+          {Number(data?.boveda?.deuda_interna || 0) > 0 && (
+            <form onSubmit={handleReabastecer} style={{ marginTop: "14px" }}>
+              <div className="form-group">
+                <label>Abonar a Deuda Interna desde Cuenta Seleccionada (MXN)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1"
+                  value={montoAbono}
+                  onChange={(e) => setMontoAbono(e.target.value)}
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={submitting}>
+                {submitting ? "Abonando..." : "Reabastecer Bóveda (OP-06)"}
+              </button>
+            </form>
+          )}
 
           <div style={{ marginTop: "20px" }}>
             <div className="kpi-title">Trazabilidad de Grafo Activa (OP-05 · Neo4j)</div>
@@ -343,20 +634,20 @@ export function App() {
       <section className="main-grid">
         <div className="card">
           <h2>
-            <span>Alertas de Depósitos Huérfanos (OP-03)</span>
+            <span>Alertas de Depósitos Huérfanos (OP-03 / OP-04)</span>
             <span className="badge badge-neo">Consulta Cypher Neo4j</span>
           </h2>
           <p className="card-desc">
-            Ingresos recibidos en cuenta que aún no tienen relación [:COMPROBADA_POR] con un CFDI.
+            Ingresos sin relación [:COMPROBADA_POR] con un CFDI. Vincula su UUID fiscal para conciliar.
           </p>
           <table>
             <thead>
               <tr>
                 <th>Transacción</th>
                 <th>Banco</th>
-                <th>Fecha</th>
                 <th>Monto</th>
-                <th>Estado</th>
+                <th>UUID CFDI 4.0</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody>
@@ -364,10 +655,27 @@ export function App() {
                 <tr key={h.transaccion_id}>
                   <td>{h.transaccion_id.slice(0, 8)}...</td>
                   <td>{h.banco}</td>
-                  <td>{h.fecha}</td>
                   <td>{formatMoney(h.monto)}</td>
                   <td>
-                    <span className="pill pill-warn">Sin CFDI</span>
+                    <input
+                      type="text"
+                      placeholder="UUID fiscal (auto si vacío)"
+                      value={cfdiInputs[h.transaccion_id] || ""}
+                      onChange={(e) =>
+                        setCfdiInputs((prev) => ({ ...prev, [h.transaccion_id]: e.target.value }))
+                      }
+                      style={{ width: "160px" }}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      disabled={submitting}
+                      onClick={() => handleVincularCfdi(h.transaccion_id)}
+                    >
+                      Vincular CFDI
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -381,7 +689,7 @@ export function App() {
             <span className="badge badge-mongo">MongoDB bitacora_boveda</span>
           </h2>
           <p className="card-desc">
-            Registro cronológico append-only de provisiones automáticas y rupturas de cristal.
+            Registro cronológico append-only de provisiones, rupturas y reabastecimientos.
           </p>
           <table>
             <thead>

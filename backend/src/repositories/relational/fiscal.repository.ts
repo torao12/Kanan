@@ -25,6 +25,7 @@ export interface RupturaResult {
 
 export class RelationalFiscalRepository {
   async provisionarIngreso(params: {
+    usuario_id: string;
     cuenta_id: string;
     cliente_id?: string | null;
     monto: number;
@@ -35,11 +36,14 @@ export class RelationalFiscalRepository {
       await client.query("BEGIN");
 
       const cuentaRes = await client.query(
-        `SELECT cuenta_id, usuario_id FROM cuenta_bancaria WHERE cuenta_id = $1 FOR UPDATE`,
-        [params.cuenta_id]
+        `SELECT cuenta_id, usuario_id
+         FROM cuenta_bancaria
+         WHERE cuenta_id = $1 AND usuario_id = $2
+         FOR UPDATE`,
+        [params.cuenta_id, params.usuario_id]
       );
       if (cuentaRes.rowCount === 0) {
-        throw new Error("Cuenta bancaria no encontrada");
+        throw new Error("Cuenta bancaria no encontrada o no pertenece al usuario autenticado");
       }
       const usuarioId: string = cuentaRes.rows[0].usuario_id;
 
@@ -186,6 +190,11 @@ export class RelationalFiscalRepository {
        FROM cuenta_bancaria WHERE usuario_id = $1`,
       [usuario_id]
     );
+    const clientesRes = await pgPool.query(
+      `SELECT cliente_id, nombre_razon_social, rfc_emisor
+       FROM cliente WHERE usuario_id = $1 ORDER BY nombre_razon_social ASC`,
+      [usuario_id]
+    );
     const txRes = await pgPool.query(
       `SELECT t.transaccion_id, t.monto, t.tipo, t.concepto, t.fecha_transaccion, c.institucion_financiera
        FROM transaccion t
@@ -199,6 +208,7 @@ export class RelationalFiscalRepository {
       usuario: userRes.rows[0] || null,
       boveda: bovedaRes.rows[0] || null,
       cuentas: cuentasRes.rows,
+      clientes: clientesRes.rows,
       transacciones_recientes: txRes.rows,
     };
   }

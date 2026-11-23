@@ -2,9 +2,11 @@ import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { initDatabases } from "./config/databases";
 import { KananController } from "./controllers/kanan.controller";
+import { AuthController } from "./controllers/auth.controller";
+import { requireAuth } from "./middleware/auth.middleware";
 
 const app = express();
-const PORT = Number(process.env.BACKEND_PORT || 8000);
+const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 8000);
 
 app.use(cors());
 app.use(express.json());
@@ -26,11 +28,14 @@ app.get("/api/v1/health", (_req: Request, res: Response) => {
   });
 });
 
-app.post("/api/v1/provisionar-ingreso", KananController.provisionarIngreso);
-app.post("/api/v1/ruptura-cristal", KananController.rupturaCristal);
-app.get("/api/v1/huerfanos/:usuario_id", KananController.obtenerHuerfanos);
-app.get("/api/v1/trazabilidad/:usuario_id", KananController.obtenerTrazabilidad);
-app.get("/api/v1/dashboard/:usuario_id", KananController.obtenerDashboard);
+app.post("/api/v1/auth/register", AuthController.register);
+app.post("/api/v1/auth/login", AuthController.login);
+
+app.post("/api/v1/provisionar-ingreso", requireAuth, KananController.provisionarIngreso);
+app.post("/api/v1/ruptura-cristal", requireAuth, KananController.rupturaCristal);
+app.get("/api/v1/huerfanos/:usuario_id?", requireAuth, KananController.obtenerHuerfanos);
+app.get("/api/v1/trazabilidad/:usuario_id?", requireAuth, KananController.obtenerTrazabilidad);
+app.get("/api/v1/dashboard/:usuario_id?", requireAuth, KananController.obtenerDashboard);
 
 initDatabases()
   .then(() => {
