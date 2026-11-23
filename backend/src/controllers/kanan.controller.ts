@@ -7,9 +7,8 @@ export class KananController {
   static async provisionarIngreso(req: Request, res: Response) {
     try {
       const usuarioId = req.user?.usuario_id;
-      if (!usuarioId) {
-        return res.status(401).json({ error: "No autenticado" });
-      }
+      if (!usuarioId) return res.status(401).json({ error: "No autenticado" });
+
       const { cuenta_id, cliente_id, monto, concepto, proveedor, simular_fallo_neo4j } = req.body;
       if (!cuenta_id || typeof monto !== "number" || monto <= 0 || !concepto) {
         return res.status(400).json({
@@ -36,9 +35,8 @@ export class KananController {
   static async rupturaCristal(req: Request, res: Response) {
     try {
       const usuarioId = req.user?.usuario_id;
-      if (!usuarioId) {
-        return res.status(401).json({ error: "No autenticado" });
-      }
+      if (!usuarioId) return res.status(401).json({ error: "No autenticado" });
+
       const { monto, justificacion } = req.body;
       if (typeof monto !== "number" || monto <= 0 || !justificacion) {
         return res.status(400).json({
@@ -54,6 +52,66 @@ export class KananController {
     } catch (error: any) {
       return res.status(400).json({
         error: error?.message || "Error al ejecutar ruptura de cristal",
+      });
+    }
+  }
+
+  static async reabastecerBoveda(req: Request, res: Response) {
+    try {
+      const usuarioId = req.user?.usuario_id;
+      if (!usuarioId) return res.status(401).json({ error: "No autenticado" });
+
+      const { cuenta_id, monto, justificacion } = req.body;
+      if (!cuenta_id || typeof monto !== "number" || monto <= 0) {
+        return res.status(400).json({
+          error: "Payload inválido: cuenta_id y monto (> 0) son obligatorios",
+        });
+      }
+      const result = await service.reabastecerBoveda({
+        usuario_id: usuarioId,
+        cuenta_id,
+        monto,
+        justificacion,
+      });
+      return res.status(200).json(result);
+    } catch (error: any) {
+      return res.status(400).json({
+        error: error?.message || "Error al reabastecer bóveda fiscal",
+      });
+    }
+  }
+
+  static async vincularCfdi(req: Request, res: Response) {
+    try {
+      const usuarioId = req.user?.usuario_id;
+      if (!usuarioId) return res.status(401).json({ error: "No autenticado" });
+
+      const { transaccion_id, uuid_fiscal } = req.body;
+      if (!transaccion_id || !uuid_fiscal || String(uuid_fiscal).trim().length < 8) {
+        return res.status(400).json({
+          error: "Payload inválido: transaccion_id y uuid_fiscal (mínimo 8 caracteres) son obligatorios",
+        });
+      }
+      const result = await service.vincularCfdi({
+        usuario_id: usuarioId,
+        transaccion_id,
+        uuid_fiscal,
+      });
+      return res.status(201).json(result);
+    } catch (error: any) {
+      return res.status(400).json({
+        error: error?.message || "Error al vincular CFDI 4.0",
+      });
+    }
+  }
+
+  static async reconciliarGrafo(_req: Request, res: Response) {
+    try {
+      const result = await service.procesarColaReconciliacion();
+      return res.status(200).json(result);
+    } catch (error: any) {
+      return res.status(500).json({
+        error: error?.message || "Error ejecutando reconciliación con Neo4j",
       });
     }
   }

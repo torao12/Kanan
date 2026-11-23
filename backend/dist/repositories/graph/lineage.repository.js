@@ -32,6 +32,23 @@ class GraphLineageRepository {
             await session.close();
         }
     }
+    async vincularCfdiEnGrafo(params) {
+        const session = databases_1.neo4jDriver.session();
+        try {
+            await session.run(`
+        MATCH (t:Transaccion {transaccion_id: $transaccion_id})
+        MERGE (f:CFDI {cfdi_id: $cfdi_id})
+        SET f.uuid_fiscal = $uuid_fiscal,
+            f.monto_total = $monto_total,
+            f.fecha_emision = $fecha_emision,
+            f.tipo = 'INGRESO'
+        MERGE (t)-[:COMPROBADA_POR {vinculado_en: $fecha_emision}]->(f)
+        `, params);
+        }
+        finally {
+            await session.close();
+        }
+    }
     async obtenerDepositosHuerfanos(usuario_id) {
         const session = databases_1.neo4jDriver.session();
         try {

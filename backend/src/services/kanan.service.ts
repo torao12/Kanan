@@ -119,6 +119,101 @@ export class KananOrchestratorService {
     };
   }
 
+  async reabastecerBoveda(input: {
+    usuario_id: string;
+    cuenta_id: string;
+    monto: number;
+    justificacion?: string;
+  }) {
+    const resultado = await this.relationalRepo.reabastecerBoveda(input);
+
+    const eventoId = await this.documentRepo.registrarEventoBoveda({
+      boveda_id: resultado.boveda_id,
+      usuario_id: input.usuario_id,
+      tipo_evento: "REABASTECIMIENTO",
+      monto: input.monto,
+      saldo_resultante: resultado.saldo_reservado,
+      deuda_resultante: resultado.deuda_restante,
+      justificacion: input.justificacion || "Abono a deuda interna de bóveda fiscal",
+    });
+
+    return {
+      evento_id: eventoId,
+      ...resultado,
+    };
+  }
+
+  async vincularCfdi(input: {
+    usuario_id: string;
+    transaccion_id: string;
+    uuid_fiscal: string;
+  }) {
+    const cfdi = await this.relationalRepo.vincularCfdiTransaccion(input);
+
+    await this.documentRepo.registrarExpedienteCfdi({
+      cfdi_id: cfdi.cfdi_id,
+      usuario_id: input.usuario_id,
+      transaccion_id: input.transaccion_id,
+      uuid_fiscal: cfdi.uuid_fiscal,
+      monto_total: cfdi.monto_total,
+      fecha_emision: cfdi.fecha_emision,
+    });
+
+    await this.graphRepo.vincularCfdiEnGrafo({
+      transaccion_id: input.transaccion_id,
+      cfdi_id: cfdi.cfdi_id,
+      uuid_fiscal: cfdi.uuid_fiscal,
+      monto_total: cfdi.monto_total,
+      fecha_emision: cfdi.fecha_emision,
+    });
+
+    return cfdi;
+  }
+
+  async procesarColaReconciliacion() {
+    const pendientes = await this.documentRepo.obtenerTareasPendientesGrafo(20);
+    let sincronizados = 0;
+    let fallidos = 0;
+
+    for (const task of pendientes) {
+      try {
+        const datos: any = task.datos || {};
+        const p = datos.provision;
+        if (!p) {
+          await this.documentRepo.marcarTareaGrafoSincronizada(task.task_id);
+          continue;
+        }
+        await this.graphRepo.registrarProvisionEnGrafo({
+          transaccion_id: p.transaccion_id,
+          cuenta_id: datos.cuenta_id,
+          boveda_id: p.boveda_id,
+          regla_id: p.regla_id,
+          cliente_id: datos.cliente_id || null,
+          monto: p.monto_bruto,
+          iva_retenido: p.iva_retenido,
+          isr_retenido: p.isr_retenido,
+          total_retenido: p.total_retenido,
+          saldo_reservado_boveda: p.saldo_reservado_boveda,
+          fecha: p.fecha,
+        });
+        await this.documentRepo.marcarTareaGrafoSincronizada(task.task_id);
+        sincronizados++;
+      } catch (err: any) {
+        await this.documentRepo.incrementarReintentoGrafo(
+          task.task_id,
+          err?.message || "Error al reconciliar con Neo4j"
+        );
+        fallidos++;
+      }
+    }
+
+    return {
+      revisados: pendientes.length,
+      sincronizados,
+      fallidos,
+    };
+  }
+
   async obtenerHuerfanos(usuario_id: string) {
     return this.graphRepo.obtenerDepositosHuerfanos(usuario_id);
   }

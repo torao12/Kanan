@@ -42,6 +42,19 @@ class DocumentAuditRepository {
         });
         return eventoId;
     }
+    async registrarExpedienteCfdi(params) {
+        const db = (0, databases_1.getMongoDb)();
+        await db.collection("expedientes_cfdi").insertOne({
+            cfdi_id: params.cfdi_id,
+            usuario_id: params.usuario_id,
+            transaccion_id: params.transaccion_id,
+            uuid_fiscal: params.uuid_fiscal,
+            version_cfdi: "4.0",
+            monto_total: mongodb_1.Decimal128.fromString(params.monto_total.toFixed(2)),
+            fecha_timbrado: params.fecha_emision,
+            registrado_en: new Date(),
+        });
+    }
     async encolarSincronizacionGrafo(evento) {
         const db = (0, databases_1.getMongoDb)();
         const taskId = `sync_${(0, crypto_1.randomUUID)()}`;
@@ -53,6 +66,23 @@ class DocumentAuditRepository {
             datos: evento,
         });
         return taskId;
+    }
+    async obtenerTareasPendientesGrafo(limit = 20) {
+        const db = (0, databases_1.getMongoDb)();
+        return db
+            .collection("pendientes_sincronizacion_grafo")
+            .find({ estado: "PENDIENTE" })
+            .sort({ creado_en: 1 })
+            .limit(limit)
+            .toArray();
+    }
+    async marcarTareaGrafoSincronizada(taskId) {
+        const db = (0, databases_1.getMongoDb)();
+        await db.collection("pendientes_sincronizacion_grafo").updateOne({ task_id: taskId }, { $set: { estado: "SINCRONIZADO", sincronizado_en: new Date() } });
+    }
+    async incrementarReintentoGrafo(taskId, errorMsg) {
+        const db = (0, databases_1.getMongoDb)();
+        await db.collection("pendientes_sincronizacion_grafo").updateOne({ task_id: taskId }, { $inc: { reintentos: 1 }, $set: { ultimo_error: errorMsg, ultimo_intento: new Date() } });
     }
     async obtenerBitacoraUsuario(usuario_id) {
         const db = (0, databases_1.getMongoDb)();

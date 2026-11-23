@@ -108,6 +108,106 @@ class RelationalFiscalRepository {
             client.release();
         }
     }
+    async reabastecerBoveda(params) {
+        const client = await databases_1.pgPool.connect();
+        try {
+            await client.query("BEGIN");
+            const cuentaRes = await client.query(`UPDATE cuenta_bancaria
+         SET saldo_disponible = saldo_disponible - $1
+         WHERE cuenta_id = $2 AND usuario_id = $3
+         RETURNING cuenta_id, saldo_disponible`, [params.monto, params.cuenta_id, params.usuario_id]);
+            if (cuentaRes.rowCount === 0) {
+                throw new Error("Cuenta bancaria no encontrada o saldo insuficiente");
+            }
+            const bovedaRes = await client.query(`UPDATE boveda_fiscal
+         SET saldo_reservado = saldo_reservado + $1,
+             deuda_interna = GREATEST(0, deuda_interna - $1),
+             actualizado_en = CURRENT_TIMESTAMP
+         WHERE usuario_id = $2
+         RETURNING boveda_id, saldo_reservado, deuda_interna`, [params.monto, params.usuario_id]);
+            if (bovedaRes.rowCount === 0) {
+                throw new Error("Bóveda fiscal no encontrada");
+            }
+            await client.query(`INSERT INTO transaccion (cuenta_id, monto, tipo, concepto)
+         VALUES ($1, $2, 'REABASTECIMIENTO', $3)`, [
+                params.cuenta_id,
+                params.monto,
+                params.justificacion || "Reabastecimiento de deuda interna en bóveda fiscal",
+            ]);
+            await client.query("COMMIT");
+            return {
+                boveda_id: bovedaRes.rows[0].boveda_id,
+                usuario_id: params.usuario_id,
+                monto_abonado: params.monto,
+                saldo_reservado: Number(bovedaRes.rows[0].saldo_reservado),
+                deuda_restante: Number(bovedaRes.rows[0].deuda_interna),
+                saldo_cuenta_restante: Number(cuentaRes.rows[0].saldo_disponible),
+            };
+        }
+        catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
+    async vincularCfdiTransaccion(params) {
+        const client = await databases_1.pgPool.connect();
+        try {
+            await client.query("BEGIN");
+            const txRes = await client.query(`SELECT t.transaccion_id, t.cliente_id, t.monto, t.tipo
+         FROM transaccion t
+         JOIN cuenta_bancaria c ON c.cuenta_id = t.cuenta_id
+         WHERE t.transaccion_id = $1 AND c.usuario_id = $2
+         FOR UPDATE`, [params.transaccion_id, params.usuario_id]);
+            if (txRes.rowCount === 0) {
+                throw new Error("Transacción no encontrada para el usuario autenticado");
+            }
+            const tx = txRes.rows[0];
+            if (tx.tipo !== "INGRESO") {
+                throw new Error("Solo se pueden vincular comprobantes de ingreso a depósitos");
+            }
+            const montoTotal = Number(tx.monto);
+            const subtotal = Number((montoTotal / 1.16).toFixed(2));
+            const montoIva = Number((montoTotal - subtotal).toFixed(2));
+            const montoIsr = Number((subtotal * 0.025).toFixed(2));
+            const fechaEmision = new Date().toISOString();
+            const cfdiRes = await client.query(`INSERT INTO cfdi (
+           usuario_id, cliente_id, uuid_fiscal, monto_subtotal, monto_iva, monto_isr, monto_total, tipo, fecha_emision
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'INGRESO', $8)
+         RETURNING cfdi_id`, [
+                params.usuario_id,
+                tx.cliente_id || null,
+                params.uuid_fiscal.trim().toUpperCase(),
+                subtotal,
+                montoIva,
+                montoIsr,
+                montoTotal,
+                fechaEmision,
+            ]);
+            await client.query("COMMIT");
+            return {
+                cfdi_id: cfdiRes.rows[0].cfdi_id,
+                transaccion_id: params.transaccion_id,
+                usuario_id: params.usuario_id,
+                uuid_fiscal: params.uuid_fiscal.trim().toUpperCase(),
+                monto_subtotal: subtotal,
+                monto_iva: montoIva,
+                monto_isr: montoIsr,
+                monto_total: montoTotal,
+                fecha_emision: fechaEmision,
+            };
+        }
+        catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     async obtenerResumenUsuario(usuario_id) {
         const userRes = await databases_1.pgPool.query(`SELECT usuario_id, nombre, email, rfc, regimen_fiscal FROM usuario WHERE usuario_id = $1`, [usuario_id]);
         const bovedaRes = await databases_1.pgPool.query(`SELECT boveda_id, saldo_reservado, deuda_interna, (saldo_reservado - deuda_interna) AS balance_neto_boveda

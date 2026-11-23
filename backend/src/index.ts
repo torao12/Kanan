@@ -4,9 +4,11 @@ import { initDatabases } from "./config/databases";
 import { KananController } from "./controllers/kanan.controller";
 import { AuthController } from "./controllers/auth.controller";
 import { requireAuth } from "./middleware/auth.middleware";
+import { KananOrchestratorService } from "./services/kanan.service";
 
 const app = express();
 const PORT = Number(process.env.BACKEND_PORT || process.env.PORT || 8000);
+const orchestrator = new KananOrchestratorService();
 
 app.use(cors());
 app.use(express.json());
@@ -33,12 +35,23 @@ app.post("/api/v1/auth/login", AuthController.login);
 
 app.post("/api/v1/provisionar-ingreso", requireAuth, KananController.provisionarIngreso);
 app.post("/api/v1/ruptura-cristal", requireAuth, KananController.rupturaCristal);
-app.get("/api/v1/huerfanos/:usuario_id?", requireAuth, KananController.obtenerHuerfanos);
-app.get("/api/v1/trazabilidad/:usuario_id?", requireAuth, KananController.obtenerTrazabilidad);
-app.get("/api/v1/dashboard/:usuario_id?", requireAuth, KananController.obtenerDashboard);
+app.post("/api/v1/reabastecer-boveda", requireAuth, KananController.reabastecerBoveda);
+app.post("/api/v1/vincular-cfdi", requireAuth, KananController.vincularCfdi);
+app.post("/api/v1/reconciliar-grafo", requireAuth, KananController.reconciliarGrafo);
+
+app.get("/api/v1/huerfanos", requireAuth, KananController.obtenerHuerfanos);
+app.get("/api/v1/huerfanos/:usuario_id", requireAuth, KananController.obtenerHuerfanos);
+app.get("/api/v1/trazabilidad", requireAuth, KananController.obtenerTrazabilidad);
+app.get("/api/v1/trazabilidad/:usuario_id", requireAuth, KananController.obtenerTrazabilidad);
+app.get("/api/v1/dashboard", requireAuth, KananController.obtenerDashboard);
+app.get("/api/v1/dashboard/:usuario_id", requireAuth, KananController.obtenerDashboard);
 
 initDatabases()
   .then(() => {
+    setInterval(() => {
+      orchestrator.procesarColaReconciliacion().catch(() => {});
+    }, 30_000);
+
     app.listen(PORT, () => {
       console.log(`[Kanan API] Conectada a PostgreSQL, MongoDB y Neo4j en http://localhost:${PORT}`);
     });
