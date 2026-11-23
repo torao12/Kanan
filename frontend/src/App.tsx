@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const API_BASE = "http://localhost:8000/api/v1";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000/api/v1";
 const USUARIO_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 
 interface CuentaBancaria {
